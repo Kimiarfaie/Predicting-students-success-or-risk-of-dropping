@@ -1,0 +1,601 @@
+---
+title: "Project"
+author: "Seyedeh Kimia Arfaie Oghani"
+output: html_document
+date: "2024-05-20"
+---
+
+```{r Loading Packages}
+library(readr)
+library(MASS)
+library(caret)
+library(dplyr)
+library(dplyr)
+```
+
+```{r data loading}
+# Read the dataset
+data <- read_csv("/Users/kimiaarfaie/Desktop/COSI/Semester 2/Data Sceince/DAta-Science-Project/dataset.csv",show_col_types = FALSE)
+head(data)
+```
+
+```{r Dataprocessing}
+# Rename 'Nacionality' to 'Nationality'
+names(data)[names(data) == "Nacionality"] <- "Nationality"
+
+# Check for null values in each column
+null_values <- sapply(data, function(x) sum(is.na(x)))
+
+# Print out null value counts
+cat("Null Values in Each Column:\n")
+cat(paste(names(null_values), null_values, sep=": ", collapse="\n"), "\n")
+
+# Examine categories in the target column
+cat("Categories in the Target Column:\n")
+print(unique(data$Target))
+
+# Encode the categories as integers
+data$Target <- factor(data$Target, levels = c("Dropout", "Enrolled", "Graduate"))
+data$Target <- as.integer(data$Target) - 1  # Subtract 1 to start encoding from 0
+
+# Check the transformation
+print(table(data$Target))
+```
+
+Exploring the linear correlation of variables with the target. This will provide us with the correlation coefficients between the 'Target' and each feature, helping to identify which features have stronger linear relationships with the outcome. 
+This is the Pearson correlation coefficients between the 'Student Status' column and all other columns in the dataframe, providing insights into the linear relationships between 'Student Status' and each feature.
+
+```{r Correlation Analysis}
+# Compute correlation matrix
+cor_matrix <- cor(data, use = "complete.obs")  # Handles missing values by using complete cases
+target_correlations <- cor_matrix["Target", ]
+
+# Sort the correlations in descending order
+sorted_target_correlations <- sort(target_correlations, decreasing = TRUE)
+
+# Print the sorted correlations with 'Target'
+print(sorted_target_correlations)
+
+```
+Exploring the potential non-linear relationship the variables may have. Let's calculate the Spearman's rank correlation. 
+
+```{r Spearman's Rank Correlation}
+# Compute Spearman's correlation matrix
+spearman_cor_matrix <- cor(data, method = "spearman", use = "complete.obs")
+
+# Extract the correlations with the 'Target' column
+target_spearman_correlations <- spearman_cor_matrix["Target", ]
+
+# Sort the correlations in descending order
+sorted_target_spearman_corr <- sort(target_spearman_correlations, decreasing = TRUE)
+
+# Print Spearman's Rank Correlation with the 'Target'
+cat("Spearman's Rank Correlation with Target:\n")
+print(sorted_target_spearman_corr)
+
+```
+
+Cleaning the Dataset¶
+Dataset cleaning focuses on refining the dataset for analysis, by removing irrelevant columns and addressing any data quality issues. This approach ensures that our model focuses on meaningful attributes that directly impact academic success, thus enhancing the model’s predictive accuracy and efficiency. Columns below show correlation coefficients between -0.1 and 0.1 from both the Spearman and Pearson correlation analyses, suggesting a weak relationship with 'Student Status'.
+
+```{r Identifying features}
+# Assuming 'pearson_corr' and 'spearman_corr' are vectors containing correlation values
+# with the 'Target' and column names as feature names
+
+# Convert these vectors to data frames
+df_pearson <- data.frame(Feature = names(target_correlations), PearsonCorrelation = unname(target_correlations))
+df_spearman <- data.frame(Feature = names(target_spearman_correlations), SpearmanCorrelation = unname(target_spearman_correlations))
+
+# Merge both data frames by feature names
+correlations_combined <- merge(df_pearson, df_spearman, by = "Feature")
+
+# Filter features where both correlations are between -0.1 and 0.1
+weakly_correlated_features <- correlations_combined %>%
+  filter(abs(PearsonCorrelation) < 0.04 & abs(SpearmanCorrelation) < 0.04)
+
+# Print the features that meet this criteria
+print(weakly_correlated_features)
+
+
+```
+Removing Nationality, Educational special needs, Inflation rate, International, Unemployment rate, Mother's qualification, Father's qualification from data as they have significantly low correlation with Target variables in both correlations. 
+
+```{r Data cleaning}
+
+# Remove the specified columns
+data <- data %>%
+  dplyr::select(-`Nationality`, -`Educational special needs`, -`Inflation rate`, -`International`, -`Unemployment rate`, -`Mother's qualification`, -`Father's qualification`)
+
+# Check the structure of the updated data frame to confirm columns are dropped
+str(data)
+```
+
+```{r}
+# Assuming your data frame is named 'data' and the target column is named 'Target'
+target_counts <- table(data$Target)
+
+# Print the counts
+print(target_counts)
+
+# Basic Pie Chart with Base R
+pie(target_counts, main = "Pie Chart of Target Variable", col = rainbow(length(target_counts)))
+
+
+```
+
+To ensure each feature is analyzed in terms of students who graduate or drop out only, the 'Enrolled' classification will be dropped from the analysis. Because students who are labelled as "enrolled" still have the opportunity to drop out during their program, whether they drop out or graduate is unknown and wouldn't give us insightful information. 
+We remove the "Enrolled" class (encoded as 1), and then re-encode "Graduate"  as 1 and "Dropout" as 0 in our dataset.
+
+```{r}
+
+# Filter out 'Enrolled' class
+data <- filter(data, Target != 1)
+
+# Step 2: Re-encode 'Graduate' from 2 to 1
+data$Target <- ifelse(data$Target == 2, 1, 0)
+
+# Check the new distribution of the Target variable to confirm changes
+table(data$Target)
+
+```
+
+Now around 62% are "Graduate" and 38% "Dropout". Let's see some of the distribution of Graduate vs Dropout regarding some features. 
+Sex: According to the data there are many more female graduates than male graduates. There appears to be a much larger sample of female students than male students. From this visualization it is easy to see that males are much more likely to drop out than females.
+Age: The majority of students in the sample population are between the ages of 18-21, consistent with what we would expect with undergraduate enrollment.
+Martial Status: We see that there is a significance imbalance regarding the martial status as most of the students are single. We can say that marital status is not likely to be a significant influence on overall student success and not an informative variable for our future models that want to predict student performance. However, as it has relative correlation with the target variable as shown before, let's not eliminate it. 
+```{r}
+# Distribution by Sex
+# Create the crosstab for Target and Gender
+ct_gender <- table(data$Target, data$Gender)
+
+# Rename the rows and columns to make the table more readable
+dimnames(ct_gender) <- list(Target = c("Dropout", "Graduate"),
+                            Gender = c("Female", "Male"))
+
+# Print the crosstab
+print(ct_gender)
+
+# Distribution by Age
+# Create a histogram of Age at Enrollment
+ggplot(data, aes(x = `Age at enrollment`)) +
+  geom_histogram(binwidth = 1, fill = "dodgerblue", alpha = 0.5) +
+  labs(title = "Distribution by Age", 
+       x = "Age at Enrollment", 
+       y = "Total Students") +
+  theme(plot.title = element_text(hjust = 0.5))  # Center the title
+
+# Distribution by Martial Status
+# Create a count plot of Marital Status with hue by Target
+ggplot(data, aes(x = factor(`Marital status`, levels = c(1, 2, 3, 4, 5,6),
+                           labels = c('Single', 'Married', 'Widower', 'Divorced', 'Defacto union', 'Legally separated')), fill = factor(Target))) +
+  geom_bar(stat = "count", position = position_dodge()) +
+  scale_fill_manual(values = c("#FF9999", "#9999FF"), 
+                    labels = c("0 (Dropout)", "1 (Graduate)"), 
+                    name = "Target") +
+  labs(title = "Distribution by Marital Status",
+       x = "Marital Status",
+       y = "Total Students") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1))
+
+# Distribution by Courses
+
+
+
+```
+1. KNN method
+KNN is sensitive to the scale of the data because it uses distance calculations to determine the 'closeness' of instances. Given our data involves features with potentially varying scales and units, it would be wise to scale our data before applying KNN to ensure that no single attribute dominates the distance calculations due to its scale.
+
+```{r KNN}
+# Scale the data
+data_scaled <- scale(data[, -which(names(data) == "Target")])  # Exclude the target variable
+
+# Convert scaled data back to a data frame and reattach the target variable
+data_scaled <- as.data.frame(data_scaled)
+data_scaled$Target <- data$Target
+
+# Splitting The data
+set.seed(123) 
+trainIndex <- createDataPartition(data_scaled$Target, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+trainData <- data_scaled[trainIndex, ]
+testData <- data_scaled[-trainIndex, ]
+
+# Convert Target to a factor for classification
+trainData$Target <- factor(trainData$Target, levels = c(0, 1), labels = c("Dropout", "Graduate"))
+testData$Target <- factor(testData$Target, levels = c(0, 1), labels = c("Dropout", "Graduate"))
+
+# KNN training , Cross validation included to ge the optimal k
+
+# Load necessary libraries
+library(caret)
+library(class)
+
+# Define training control
+train_control <- trainControl(
+  method = "cv",    # Cross-validation
+  number = 10       # Number of folds
+)
+
+# Train the model with a range of k values to find the optimal
+mknn <- train(
+  Target ~ ., 
+  data = trainData, 
+  method = "knn",
+  trControl = train_control,
+  tuneLength = 20   # Tune over 20 different values of k
+)
+
+# Print the results to see the best 'k'
+print(mknn)
+plot(mknn)
+
+# Using the best k value found, predict on test data
+best_k <- mknn$bestTune$k
+knn_pred <- knn(train = trainData[, -which(names(trainData) == "Target")], 
+                test = testData[, -which(names(testData) == "Target")],
+                cl = trainData$Target, k = best_k)
+
+# Evaluate the model
+conf_matrix <- table(Predicted = knn_pred, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("Accuracy:", accuracy))
+
+mknn$finalModel  # Directly accesses the final model chosen after training
+```
+The plot shows the cross-validation accuracy for different values of k (number of neighbors).
+There is a clear trend where the accuracy peaks at around k=7 and generally decreases as k increases further. This decrease in accuracy as k grows suggests that larger neighborhoods dilute the local structure captured by the KNN model, possibly including more noise from less similar instances.
+According to the results, the highest accuracy achieved was with k=7. This aligns well with your plot showing that smaller values of k perform better, but with k=7 specifically balancing the bias-variance trade-off effectively before the accuracy starts to decline more noticeably.
+
+2. LDA
+Linear Discriminant Analysis (LDA) is a classic technique used for classification and dimensionality reduction. LDA assumes that the different classes generate data based on Gaussian distributions with class-specific means but identical covariance matrices for each class.
+
+Unlike algorithms like KNN, LDA does not necessarily require feature scaling. LDA is quite robust to the scale of the data because it inherently considers the variances of the variables to separate the classes.
+
+LDA assumes that the predictors are normally distributed within each class. While this assumption isn't strictly enforced in practice, ensuring approximately normal distributions can improve model performance.
+
+```{r LDA}
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Ensuring Target is a factor
+data$Target <- factor(data$Target, levels = c(0, 1), labels = c("Dropout", "Graduate"))
+print(levels(data$Target))
+
+# Splitting the data
+index <- createDataPartition(y = data$Target, p = 0.75, list = TRUE, times = 1)
+trainData <- data[index[[1]], ]
+testData <- data[-index[[1]], ]
+print(table(trainData$Target))
+print(table(testData$Target))
+# Fitting LDA model on training data using MASS
+mlda <- lda(Target ~ ., data = trainData)
+
+# Summary of the model
+print(summary(mlda))
+
+# Predictions on the testing set
+predictions <- predict(mlda, testData)
+predictedClasses <- predictions$class
+
+# Confusion Matrix and accuracy
+conf_matrix <- table(Predicted = predictedClasses, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy:", accuracy, "\n")
+
+
+```
+Dropout Graduate 830 1312: This represents the distribution of your classes in the training dataset. There are 830 instances of "Dropout" and 1312 instances of "Graduate".
+Dropout Graduate 276 437: Similarly, this shows the distribution in the testing dataset or another subset.
+
+
+1. Prior
+Description: The prior probabilities represent the estimated probabilities of each class within the training data. If not specified explicitly during model training, these probabilities are calculated based on the relative frequencies of each class.
+Interpretation: If you have two classes, "Dropout" and "Graduate", the prior probabilities tell you the likelihood of encountering each class before observing any features of the instances. For instance, if the priors are roughly equal, the training data contained about the same number of dropouts and graduates.
+2. Counts
+Description: This shows the number of instances of each class in the training dataset.
+Interpretation: These values are used to calculate the prior probabilities and are critical for understanding the dataset's balance or imbalance. A significant imbalance can influence model bias toward the more frequent class.
+3. Means
+Description: The means of each predictor variable for each class. These are average values of features calculated separately for each class.
+Interpretation: These means are crucial as they are used by LDA to determine the centroids of each class in the feature space. LDA will use these centroids to maximize the distance between classes while minimizing the variance within each class, thereby aiding in effective classification.
+4. Scaling
+Description: The scaling coefficients are used to construct the discriminant functions. These coefficients are derived from the covariance matrix of the predictors and are used to linearly transform the data.
+Interpretation: These coefficients tell you how each predictor variable should be weighted to maximize the separation between the classes. The larger the absolute value of a coefficient, the more important that variable is for discriminating between classes.
+5. Lev
+Description: The levels of the factor specifying the classes.
+Interpretation: This simply lists the classes that the model is distinguishing between, which in your case are "Dropout" and "Graduate".
+6. SVD (Singular Value Decomposition)
+Description: The singular values from the decomposition of the matrix of class means, which are used in computing the discriminants.
+Interpretation: The singular values indicate the strength of each dimension in separating the classes. Larger singular values correspond to dimensions that are more effective at discriminating between the classes.
+7. N
+Description: Total number of observations used to fit the model.
+Interpretation: Indicates the size of the dataset used for training the model, which can have implications for the model's generalizability and the reliability of its statistical estimates.
+8. Call
+Description: The function call used to generate the model, showing exactly how the model was fitted.
+Interpretation: Useful for documentation and reproducibility, allowing others (or yourself in the future) to see how the model was specified.
+9. Terms
+Description: The model terms, usually derived from the formula used in the model.
+Interpretation: Shows which predictors are included in the model and how they are mathematically related to the target variable.
+10. Xlevels
+Description: Levels of factor predictors in the model, useful when the model has categorical predictors.
+Interpretation: This would list the categories of each factor predictor if applicable, which is important for understanding how categorical variables are handled in the model.
+
+3. Logistic Regression
+
+Logistic regression uses a logistic function to model a binary outcome based on an independent set of variables. It predicts the probability that an observation belongs to one of the classes.
+
+The logistic function outputs a value between 0 and 1, which can be interpreted as the probability of the dependent variable being a 'success' or 'positive' instance (usually labeled as "1").
+
+A threshold (commonly 0.5) is used to decide the class assignment. If the predicted probability is greater than 0.5, the instance is predicted to be in the positive class; otherwise, it is placed in the negative class.
+
+We have to ensure the target variable is a binary factor with two levels, where one level is considered "success" and the other "failure". 
+
+in the end applying cross-validation manually to assess the performance of the refined model across different subsets of your data.
+```{r Logistic Regression}
+# Splitting the data
+index <- createDataPartition(y = data$Target, p = 0.8, list = TRUE, times = 1)
+trainData <- data[index[[1]], ]
+testData <- data[-index[[1]], ]
+
+# Check if the split contains both classes adequately
+table(trainData$Target)
+table(testData$Target)
+
+# Fit the logistic regression model - Full model with all the predictors
+mlr <- glm(Target ~ ., data = trainData, family = binomial())
+
+# Perform stepwise selection
+mlr <- step(mlr, direction="both", trace=0)
+
+# Summary of the selected model
+summary(mlr)
+
+# Evaluate using cross-validation manually
+cv_results <- train(mlr$formula, data = trainData, method = "glm", 
+                    family = binomial(), trControl = trainControl(method = "cv", number = 10, classProbs = TRUE))
+
+# Print cross-validation results
+print(cv_results)
+
+# Predict and evaluate on the test data
+predicted_probs <- predict(mlr, newdata = testData, type = "response")
+predicted_classes <- ifelse(predicted_probs > 0.5, "Graduate", "Dropout")
+conf_matrix <- table(Predicted = predicted_classes, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy:", accuracy, "\n")
+
+```
+4. Decision Trees
+
+the results of the complexity parameter (cp) analysis from the plotcp function applied to a decision tree model. This output is crucial for determining the optimal complexity of the tree to balance model accuracy with simplicity, thereby preventing overfitting. 
+
+Cross-Validated Relative Error (xerror):
+
+The xerror value represents the cross-validated relative error for each complexity parameter. It is a measure of how well the tree with a particular cp performs on unseen data.
+Lower xerror values indicate better generalization.
+Complexity Parameter (cp):
+
+The cp is a threshold for determining when further splits are no longer adding significant predictive accuracy to the decision tree.
+When cp is higher, fewer splits are included, resulting in a simpler model.
+Plot Interpretation:
+
+The plot shows cp on the x-axis and the relative error on the y-axis. Each point represents a tree size and its corresponding error. The line connects the points showing how the error changes as the tree complexity changes.
+The dotted horizontal line is an important guide. It marks one standard error above the minimum of the cross-validated error (xerror). The simplest model within one standard error of the lowest error is often chosen as the best compromise between complexity and performance.
+Choosing the Best cp:
+
+From your plot, the error sharply decreases as the tree complexity reduces (from left to right) and stabilizes around cp = 0.025. The value at cp = 0.011 also shows a relative error close to the lowest point but with a simpler model.
+The general rule of thumb is to select the simplest model (highest cp) that is within one standard error of the lowest cross-validated error. From your table and plot, cp = 0.025 seems to be a good candidate since it balances error reduction and model simplicity well.
+
+
+```{r Decision Trees}
+library(rpart)
+library(rpart.plot)
+
+mtree <- rpart(Target ~ ., data = trainData, method = "class")
+
+# Print the summary of the tree
+print(summary(mtree))
+
+# Plot the decision tree
+rpart.plot(mtree)
+
+# Predict using the decision tree
+predicted_classes <- predict(mtree, testData, type = "class")
+
+# Create a confusion matrix to evaluate predictions
+conf_matrix <- table(Predicted = predicted_classes, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+cat("\n-------\n")
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("\nAccuracy:", accuracy, "\n")
+
+# Analyze the complexity
+# Review cp table
+printcp(mtree)
+
+# Plot the error vs cp
+plotcp(mtree)
+
+# Prune the tree at cp = 0.025
+pruned_mtree <- prune(mtree, cp = 0.025)
+
+# Plot the pruned tree
+rpart.plot(pruned_mtree)
+
+# Evaluate the pruned tree
+predicted_classes_pruned <- predict(pruned_mtree, testData, type = "class")
+conf_matrix_pruned <- table(Predicted = predicted_classes_pruned, Actual = testData$Target)
+print(conf_matrix_pruned)
+accuracy_pruned <- sum(diag(conf_matrix_pruned)) / sum(conf_matrix_pruned)
+cat("\n-------\n")
+cat("\nPruned Tree Accuracy:", accuracy_pruned, "\n")
+
+```
+5. Random Forests
+
+Using cross validation to find the optimal ntree
+
+```{r}
+# Set up training control for cross validation
+
+train_control <- trainControl(
+  method = "cv",       # k-fold cross-validation
+  number = 5,          # number of folds
+  savePredictions = "final",
+)
+
+# Define the tuning grid for mtry
+num_features <- ncol(trainData) - 1
+mtry_values <- seq(from = sqrt(num_features), to = num_features/2, length.out = 5)
+tune_grid <- expand.grid(mtry = round(mtry_values))
+
+# Train the model named 'mrf' with the tuning grid
+mrf <- train(Target ~ ., data = trainData, method = "rf",
+             trControl = train_control, tuneGrid = tune_grid,
+             metric = "Accuracy")
+
+# Output the results
+print(mrf)
+
+# Make predictions on the test dataset
+test_predictions <- predict(mrf, newdata = testData)
+
+# Create a confusion matrix to evaluate predictions
+conf_matrix <- table(Predicted = test_predictions, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+test_accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("-------------\n")
+cat("Test Set Accuracy: ", test_accuracy, "\n")
+
+
+```
+
+6. ANN
+
+```{r ANN}
+# Load necessary libraries
+library(nnet)
+set.seed(1)
+
+data_copy <- data
+
+index <- createDataPartition(y = data_copy$Target, p = 0.8, list = TRUE, times = 1)
+trainData <- data_copy[index[[1]], ]
+testData <- data_copy[-index[[1]], ]
+
+sizes <- seq(1, 10)
+
+results <- data.frame(size = integer(), accuracy = numeric(), stringsAsFactors = FALSE)
+
+
+# Loop over sizes
+for (size in sizes) {
+    # Train model with current size
+    set.seed(123)  # for reproducibility
+    model <- nnet(Target ~ ., data = trainData, size = size, decay = 0.1, maxit = 200)
+
+    # Predict on the training set (or validation set if available)
+    predictions <- predict(model, newdata = trainData, type = "class")
+    
+    # Create a confusion matrix and calculate accuracy
+    conf_matrix <- table(Predicted = predictions, Actual = trainData$Target)
+    accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+    
+    # Store results
+    results <- rbind(results, data.frame(size = size, accuracy = accuracy))
+}
+
+# Print the results
+print(results)
+
+mann <- nnet(Target ~ ., data = trainData, size = 8, decay = 0.1, maxit = 200)
+
+```
+7. SVM
+
+Testing different values for the cost 
+```{r}
+set.seed(123)  # For reproducibility
+indexes <- sample(1:nrow(data), size = 0.8 * nrow(data))
+trainData <- data[indexes, ]
+testData <- data[-indexes, ]
+
+cost_values <- 10^seq(-2, 1, by = 1)  # From 0.001 to 10 in exponential steps
+
+tuning_results <- tune.svm(x = trainData[, -which(names(trainData) == "Target")],
+                           y = trainData$Target,
+                           kernel = "linear",
+                           cost = cost_values,
+                           scale = FALSE)
+cat("Best Cost:", tuning_results$best.parameters$cost, "\n")
+```
+
+```{r SVM}
+library(e1071)
+
+set.seed(123)  # For reproducibility
+indexes <- sample(1:nrow(data), size = 0.8 * nrow(data))
+trainData <- data[indexes, ]
+testData <- data[-indexes, ]
+
+msvm <- svm(Target ~ ., data = trainData, kernel = "linear", cost = 10, scale = FALSE)
+
+# Predict on test data
+predictions <- predict(msvm, newdata = testData)
+
+# Create a confusion matrix to evaluate predictions
+conf_matrix <- table(Predictions = predictions, Actual = testData$Target)
+print(conf_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Test Set Accuracy: ", accuracy, "\n")
+
+```
+8. Clustering technique
+
+```{r Kmeans Clustering}
+library(tidyverse)
+
+# Scale the data
+data_scaled <- scale(data[, -which(names(data) == "Target")])  # Exclude the target variable
+
+# Convert scaled data back to a data frame and reattach the target variable
+data_scaled <- as.data.frame(data_scaled)
+data_scaled$Target <- data$Target
+
+# Splitting The data
+set.seed(123) 
+trainIndex <- createDataPartition(data_scaled$Target, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+trainData <- data_scaled[trainIndex, ]
+testData <- data_scaled[-trainIndex, ]
+
+set.seed(123)  # For reproducibility
+wss <- sapply(1:10, function(k) {
+    sum(kmeans(data_scaled, centers = k, nstart = 20)$withinss)
+})
+
+# Plotting the Elbow Curve
+plot(1:10, wss, type = "b", pch = 19, frame = FALSE, 
+     xlab = "Number of clusters K", 
+     ylab = "Total within-clusters sum of squares")
+
+```
+
