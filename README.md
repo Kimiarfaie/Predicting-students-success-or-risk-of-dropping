@@ -1,6 +1,9 @@
-# Data Science Project
-The objective of this assignment is to develop a predictive model to predict a student’s success or risk of dropping out based on a number of information known at the time of student enrollment; academic trajectory, demographics and social-economic factors. 
-The data is analyzed the data and effective predictive models were built. All the techniques studied along the course were considered, namely:
+# Predicting Students' Sucess or Risk of Dropping out
+
+This repository contains the code for the coursework of Data Science course at UGR. The objective of this assignment is to develop a predictive model to predict a student’s success or risk of dropping out based on a number of information known at the time of student enrollment; academic trajectory, demographics and social-economic factors. 
+
+The data is analyzed and effective predictive models were built. All the techniques studied along the course were considered, namely:
+
 1. KNN (mknn)
 2. Linear Discriminant Analysis (mlda)
 3. Logistic Regression (mlr)
